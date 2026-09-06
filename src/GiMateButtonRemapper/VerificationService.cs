@@ -5,6 +5,7 @@ namespace GiHATE;
 internal sealed record VerificationResult(
     bool HasProfile,
     bool? HidDisabled,
+    bool? PersistentDisableFlagSet,
     bool MappingMatches,
     bool MappingExists,
     ushort MappingDestination,
@@ -19,6 +20,9 @@ internal sealed record VerificationResult(
 
 internal static class VerificationService
 {
+    private const uint CmProbDisabled = 22;
+    private const uint ConfigFlagDisabled = 0x00000001;
+
     public static readonly string[] GigabyteListenerProcessNames =
     [
         "GiMATE",
@@ -32,9 +36,12 @@ internal static class VerificationService
     public static VerificationResult Check(AppConfig config)
     {
         if (config.Profile is null)
-            return new VerificationResult(false, null, false, false, 0, config.IsRestartPending, config.RestartOccurred, config.RestartReason, FindGigabyteProcesses(), false);
+            return new VerificationResult(false, null, null, false, false, 0, config.IsRestartPending, config.RestartOccurred, config.RestartReason, FindGigabyteProcesses(), false);
 
-        var hidDisabled = DeviceManager.IsDisabled(config.Profile.VendorInstanceId);
+        var status = DeviceManager.GetStatus(config.Profile.VendorInstanceId);
+        var flags = DeviceManager.GetPersistentConfigFlags(config.Profile.VendorInstanceId);
+        bool? hidDisabled = status is null ? null : status.Value.Problem == CmProbDisabled;
+        bool? persistentDisable = flags is null ? null : (flags.Value & ConfigFlagDisabled) != 0;
         var mapping = ScancodeMap.GetSourceMapping(config.Profile.SourceScanCode);
 
         bool expectedMappingExists;
@@ -63,15 +70,22 @@ internal static class VerificationService
         var mappingMatches = expectedMappingExists
             ? mapping.Exists && mapping.Destination == expectedDestination
             : !mapping.Exists;
-        var hidMatches = hidDisabled is not null && hidDisabled.Value == expectedHidDisabled;
+
+        // On the same boot where a persistent disable/enable was scheduled,
+        // the current live HID state is allowed to differ until reboot.
+        var hidMatches = config.IsRestartPending
+            ? persistentDisable is not null && persistentDisable.Value == expectedHidDisabled
+            : hidDisabled is not null && hidDisabled.Value == expectedHidDisabled;
+
         var expectedMatches = mappingMatches && hidMatches;
         var processes = FindGigabyteProcesses();
 
-        AppLog.Info($"Verification: HidDisabled={hidDisabled?.ToString() ?? "unknown"}, ExpectedHidDisabled={expectedHidDisabled}, MappingExists={mapping.Exists}, MappingDestination=0x{mapping.Destination:X4}, ExpectedMappingExists={expectedMappingExists}, ExpectedDestination=0x{expectedDestination:X4}, RestartPending={config.IsRestartPending}, RestartOccurred={config.RestartOccurred}, GigabyteReady={processes.Count > 0}, ExpectedStateMatches={expectedMatches}");
+        AppLog.Info($"Verification: HidDisabledNow={hidDisabled?.ToString() ?? "unknown"}, PersistentDisableFlag={persistentDisable?.ToString() ?? "unknown"}, ExpectedHidDisabled={expectedHidDisabled}, MappingExists={mapping.Exists}, MappingDestination=0x{mapping.Destination:X4}, ExpectedMappingExists={expectedMappingExists}, ExpectedDestination=0x{expectedDestination:X4}, RestartPending={config.IsRestartPending}, RestartOccurred={config.RestartOccurred}, GigabyteReady={processes.Count > 0}, ExpectedStateMatches={expectedMatches}");
 
         return new VerificationResult(
             true,
             hidDisabled,
+            persistentDisable,
             mappingMatches,
             mapping.Exists,
             mapping.Destination,
