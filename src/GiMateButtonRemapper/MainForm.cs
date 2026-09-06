@@ -45,7 +45,7 @@ public sealed class MainForm : Form
             RefreshUi();
             PendingRestartWatcherForm.StartDetachedIfNeeded(_config);
             if (_openAdvancedOnShown)
-                BeginInvoke(OpenAdvanced);
+                BeginInvoke((MethodInvoker)(() => OpenAdvanced()));
         };
     }
 
@@ -357,8 +357,9 @@ public sealed class MainForm : Form
         try
         {
             AppLog.Info($"===== {logName} START =====");
-            var expectedExists = _config.OriginalMappingCaptured && _config.HadOriginalSourceMapping;
-            var expectedDestination = _config.OriginalMappingCaptured ? _config.OriginalSourceDestination : (ushort)0;
+            var currentMapping = ScancodeMap.GetSourceMapping(_config.Profile.SourceScanCode);
+            var expectedExists = _config.OriginalMappingCaptured ? _config.HadOriginalSourceMapping : currentMapping.Exists;
+            var expectedDestination = _config.OriginalMappingCaptured ? _config.OriginalSourceDestination : currentMapping.Destination;
 
             var deviceResult = DeviceManager.Enable(_config.Profile.VendorInstanceId);
             if (_config.OriginalMappingCaptured)
@@ -373,11 +374,6 @@ public sealed class MainForm : Form
             AppLog.Info($"===== {logName} SUCCESS ===== DeviceMethod={deviceResult.Method}");
 
             await PromptForRestartAsync("GiHATE restored the GiMATE device path and pre-GiHATE scan-code state. Windows must restart before the restored behavior is active.");
-
-            _config.OriginalMappingCaptured = false;
-            _config.HadOriginalSourceMapping = false;
-            _config.OriginalSourceDestination = 0;
-            _config.Save();
         }
         catch (Exception ex)
         {
