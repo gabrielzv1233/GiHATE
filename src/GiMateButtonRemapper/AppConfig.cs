@@ -4,11 +4,12 @@ namespace GiHATE;
 
 public sealed class AppConfig
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
     public int Version { get; set; } = CurrentVersion;
     public DetectedProfile? Profile { get; set; }
     public string TargetKey { get; set; } = "F24";
     public bool Applied { get; set; }
+    public bool OriginalMappingCaptured { get; set; }
     public bool HadOriginalSourceMapping { get; set; }
     public ushort OriginalSourceDestination { get; set; }
 
@@ -26,7 +27,14 @@ public sealed class AppConfig
             }
 
             var config = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(FilePath), JsonOptions()) ?? new AppConfig();
-            AppLog.Info($"Config loaded. Version={config.Version}, Applied={config.Applied}, Target={config.TargetKey}, Profile={(config.Profile is null ? "none" : config.Profile.DisplayName)}");
+
+            // 0.1.3 and earlier always captured the original mapping before a
+            // successful Apply, but did not have an explicit flag for it.
+            if (config.Version < 2 && config.Applied)
+                config.OriginalMappingCaptured = true;
+
+            config.Version = CurrentVersion;
+            AppLog.Info($"Config loaded. Version={config.Version}, Applied={config.Applied}, OriginalMappingCaptured={config.OriginalMappingCaptured}, Target={config.TargetKey}, Profile={(config.Profile is null ? "none" : config.Profile.DisplayName)}");
             if (config.Profile is not null)
             {
                 AppLog.Info($"Config keyboard instance: {config.Profile.KeyboardInstanceId}");
@@ -44,9 +52,10 @@ public sealed class AppConfig
 
     public void Save()
     {
+        Version = CurrentVersion;
         Directory.CreateDirectory(DirectoryPath);
         File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions()));
-        AppLog.Info($"Config saved. Applied={Applied}, Target={TargetKey}, Profile={(Profile is null ? "none" : Profile.DisplayName)}");
+        AppLog.Info($"Config saved. Applied={Applied}, OriginalMappingCaptured={OriginalMappingCaptured}, Target={TargetKey}, Profile={(Profile is null ? "none" : Profile.DisplayName)}");
     }
 
     private static JsonSerializerOptions JsonOptions() => new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
