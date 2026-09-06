@@ -7,7 +7,7 @@ internal static class BootSession
         get
         {
             var bootUtc = DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(Environment.TickCount64);
-            var roundedTicks = bootUtc.UtcTicks / TimeSpan.TicksPerMinute * TimeSpan.TicksPerMinute;
+            var roundedTicks = bootUtc.UtcDateTime.Ticks / TimeSpan.TicksPerMinute * TimeSpan.TicksPerMinute;
             return new DateTimeOffset(roundedTicks, TimeSpan.Zero).ToString("yyyyMMddHHmm");
         }
     }
