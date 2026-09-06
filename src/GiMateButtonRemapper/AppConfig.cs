@@ -4,7 +4,8 @@ namespace GiHATE;
 
 public sealed class AppConfig
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
+
     public int Version { get; set; } = CurrentVersion;
     public DetectedProfile? Profile { get; set; }
     public string TargetKey { get; set; } = "F24";
@@ -13,8 +14,49 @@ public sealed class AppConfig
     public bool HadOriginalSourceMapping { get; set; }
     public ushort OriginalSourceDestination { get; set; }
 
+    public bool RestartRequired { get; set; }
+    public string RestartBootId { get; set; } = "";
+    public string RestartReason { get; set; } = "";
+    public DateTimeOffset? RestartRequestedAt { get; set; }
+    public bool PendingExpectedHidDisabled { get; set; }
+    public bool PendingExpectedMappingExists { get; set; }
+    public ushort PendingExpectedMappingDestination { get; set; }
+    public string VerificationTaskName { get; set; } = "";
+
     public static string DirectoryPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GiHATE");
     public static string FilePath => Path.Combine(DirectoryPath, "config.json");
+
+    public bool IsRestartPending => RestartRequired && BootSession.IsSameBoot(RestartBootId);
+    public bool RestartOccurred => RestartRequired && !string.IsNullOrWhiteSpace(RestartBootId) && !BootSession.IsSameBoot(RestartBootId);
+
+    public void MarkRestartRequired(
+        string reason,
+        bool expectedHidDisabled,
+        bool expectedMappingExists,
+        ushort expectedMappingDestination)
+    {
+        RestartRequired = true;
+        RestartBootId = BootSession.CurrentId;
+        RestartReason = reason;
+        RestartRequestedAt = DateTimeOffset.Now;
+        PendingExpectedHidDisabled = expectedHidDisabled;
+        PendingExpectedMappingExists = expectedMappingExists;
+        PendingExpectedMappingDestination = expectedMappingDestination;
+        AppLog.Info($"Restart marked required. Reason={reason}, BootId={RestartBootId}, ExpectedHidDisabled={expectedHidDisabled}, ExpectedMappingExists={expectedMappingExists}, ExpectedMappingDestination=0x{expectedMappingDestination:X4}");
+    }
+
+    public void ClearRestartRequired()
+    {
+        AppLog.Info($"Clearing restart-required state. Previous reason={RestartReason}, BootId={RestartBootId}");
+        RestartRequired = false;
+        RestartBootId = "";
+        RestartReason = "";
+        RestartRequestedAt = null;
+        PendingExpectedHidDisabled = false;
+        PendingExpectedMappingExists = false;
+        PendingExpectedMappingDestination = 0;
+        VerificationTaskName = "";
+    }
 
     public static AppConfig Load()
     {
@@ -28,13 +70,11 @@ public sealed class AppConfig
 
             var config = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(FilePath), JsonOptions()) ?? new AppConfig();
 
-            // 0.1.3 and earlier always captured the original mapping before a
-            // successful Apply, but did not have an explicit flag for it.
             if (config.Version < 2 && config.Applied)
                 config.OriginalMappingCaptured = true;
 
             config.Version = CurrentVersion;
-            AppLog.Info($"Config loaded. Version={config.Version}, Applied={config.Applied}, OriginalMappingCaptured={config.OriginalMappingCaptured}, Target={config.TargetKey}, Profile={(config.Profile is null ? "none" : config.Profile.DisplayName)}");
+            AppLog.Info($"Config loaded. Version={config.Version}, Applied={config.Applied}, OriginalMappingCaptured={config.OriginalMappingCaptured}, Target={config.TargetKey}, RestartRequired={config.RestartRequired}, RestartPending={config.IsRestartPending}, Profile={(config.Profile is null ? "none" : config.Profile.DisplayName)}");
             if (config.Profile is not null)
             {
                 AppLog.Info($"Config keyboard instance: {config.Profile.KeyboardInstanceId}");
@@ -55,10 +95,29 @@ public sealed class AppConfig
         Version = CurrentVersion;
         Directory.CreateDirectory(DirectoryPath);
         File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions()));
-        AppLog.Info($"Config saved. Applied={Applied}, OriginalMappingCaptured={OriginalMappingCaptured}, Target={TargetKey}, Profile={(Profile is null ? "none" : Profile.DisplayName)}");
+        AppLog.Info($"Config saved. Applied={Applied}, OriginalMappingCaptured={OriginalMappingCaptured}, Target={TargetKey}, RestartRequired={RestartRequired}, RestartPending={IsRestartPending}, Profile={(Profile is null ? "none" : Profile.DisplayName)}");
     }
 
-    private static JsonSerializerOptions JsonOptions() => new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
+    public void CopyFrom(AppConfig other)
+    {
+        Version = CurrentVersion;
+        Profile = other.Profile;
+        TargetKey = other.TargetKey;
+        Applied = other.Applied;
+        OriginalMappingCaptured = other.OriginalMappingCaptured;
+        HadOriginalSourceMapping = other.HadOriginalSourceMapping;
+        OriginalSourceDestination = other.OriginalSourceDestination;
+        RestartRequired = other.RestartRequired;
+        RestartBootId = other.RestartBootId;
+        RestartReason = other.RestartReason;
+        RestartRequestedAt = other.RestartRequestedAt;
+        PendingExpectedHidDisabled = other.PendingExpectedHidDisabled;
+        PendingExpectedMappingExists = other.PendingExpectedMappingExists;
+        PendingExpectedMappingDestination = other.PendingExpectedMappingDestination;
+        VerificationTaskName = other.VerificationTaskName;
+    }
+
+    internal static JsonSerializerOptions JsonOptions() => new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
 }
 
 public sealed class DetectedProfile
