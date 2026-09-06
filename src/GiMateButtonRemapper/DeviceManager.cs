@@ -181,8 +181,9 @@ internal static class DeviceManager
         0x13 => "CR_FAILURE",
         0x15 => "CR_CREATE_BLOCKED",
         CrRemoveVetoed => "CR_REMOVE_VETOED",
-        0x1D => "CR_ACCESS_DENIED",
-        0x33 => "CR_CALL_NOT_IMPLEMENTED",
+        0x1D => "CR_REGISTRY_ERROR",
+        0x33 => "CR_ACCESS_DENIED",
+        0x34 => "CR_CALL_NOT_IMPLEMENTED",
         _ => "CONFIGRET error"
     };
 
