@@ -17,7 +17,7 @@ internal static class ScancodeMap
     public static (bool Exists, ushort Destination) GetSourceMapping(ushort source)
     {
         var mappings = ReadMappings();
-        return mappings.TryGetValue(source, out var destination) ? (true, destination) : (false, 0);
+        return mappings.TryGetValue(source, out var destination) ? (true, destination) : (false, (ushort)0);
     }
 
     public static void SetMapping(ushort source, ushort destination)
