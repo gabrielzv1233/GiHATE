@@ -19,16 +19,34 @@ public sealed class AppConfig
     {
         try
         {
-            if (!File.Exists(FilePath)) return new AppConfig();
-            return JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(FilePath), JsonOptions()) ?? new AppConfig();
+            if (!File.Exists(FilePath))
+            {
+                AppLog.Info("No existing config file found. Starting unconfigured.");
+                return new AppConfig();
+            }
+
+            var config = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(FilePath), JsonOptions()) ?? new AppConfig();
+            AppLog.Info($"Config loaded. Version={config.Version}, Applied={config.Applied}, Target={config.TargetKey}, Profile={(config.Profile is null ? "none" : config.Profile.DisplayName)}");
+            if (config.Profile is not null)
+            {
+                AppLog.Info($"Config keyboard instance: {config.Profile.KeyboardInstanceId}");
+                AppLog.Info($"Config vendor instance: {config.Profile.VendorInstanceId}");
+                AppLog.Info($"Config vendor HID: usage=0x{config.Profile.VendorUsagePage:X4}/0x{config.Profile.VendorUsage:X2}, report={config.Profile.VendorReportHex}");
+            }
+            return config;
         }
-        catch { return new AppConfig(); }
+        catch (Exception ex)
+        {
+            AppLog.Exception("Failed to load config. Starting with a new config", ex);
+            return new AppConfig();
+        }
     }
 
     public void Save()
     {
         Directory.CreateDirectory(DirectoryPath);
         File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions()));
+        AppLog.Info($"Config saved. Applied={Applied}, Target={TargetKey}, Profile={(Profile is null ? "none" : Profile.DisplayName)}");
     }
 
     private static JsonSerializerOptions JsonOptions() => new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
