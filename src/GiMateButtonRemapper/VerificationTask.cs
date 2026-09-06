@@ -21,6 +21,7 @@ internal static class VerificationTask
                 "/SC", "ONLOGON",
                 "/DELAY", "0000:10",
                 "/RL", "HIGHEST",
+                "/IT",
                 "/F");
 
             if (result.ExitCode != 0)
@@ -28,11 +29,13 @@ internal static class VerificationTask
 
             config.VerificationTaskName = taskName;
             config.Save();
-            AppLog.Info($"Scheduled one-shot verification task '{taskName}' for the next interactive logon. It self-deletes after a reboot is detected and verification runs.");
+            AppLog.Info($"Scheduled interactive one-shot verification task '{taskName}' for logon. It is kept if the same boot is still active and self-deletes after a newer boot is detected.");
             return true;
         }
         catch (Exception ex)
         {
+            config.VerificationTaskName = "";
+            config.Save();
             AppLog.Exception("Failed to schedule post-reboot verification task", ex);
             return false;
         }
