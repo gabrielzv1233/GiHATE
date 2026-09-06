@@ -19,8 +19,8 @@ internal sealed class VerifyForm : Form
 
         Text = "GiHATE verification";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(560, 390);
-        MinimumSize = new Size(560, 390);
+        ClientSize = new Size(560, 410);
+        MinimumSize = new Size(560, 410);
         MaximizeBox = false;
         MinimizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -90,12 +90,7 @@ internal sealed class VerifyForm : Form
             return;
         }
 
-        _hid.Text = result.HidDisabled switch
-        {
-            true => "✓ GiMATE vendor HID: Disabled",
-            false => "✕ GiMATE vendor HID: Enabled",
-            null => "? GiMATE vendor HID: State unknown"
-        };
+        _hid.Text = FormatHid(result);
 
         var source = _config.Profile.SourceScanCode;
         bool expectedExists;
@@ -162,6 +157,33 @@ internal sealed class VerifyForm : Form
                 _config.Save();
             }
         }
+    }
+
+    private string FormatHid(VerificationResult result)
+    {
+        if (result.RestartPending)
+        {
+            if (_config.PendingExpectedHidDisabled && result.PersistentDisableFlagSet == true)
+            {
+                return result.HidDisabled == true
+                    ? "✓ GiMATE vendor HID: Disabled now; persistent disable is set"
+                    : "⚠ GiMATE vendor HID: Enabled now; disable is scheduled for restart";
+            }
+
+            if (!_config.PendingExpectedHidDisabled && result.PersistentDisableFlagSet == false)
+            {
+                return result.HidDisabled == false
+                    ? "✓ GiMATE vendor HID: Enabled now; persistent disable is cleared"
+                    : "⚠ GiMATE vendor HID: Disabled now; enable is scheduled for restart";
+            }
+        }
+
+        return result.HidDisabled switch
+        {
+            true => "✓ GiMATE vendor HID: Disabled",
+            false => "✕ GiMATE vendor HID: Enabled",
+            null => "? GiMATE vendor HID: State unknown"
+        };
     }
 
     private static string FormatGigabyte(VerificationResult result)
