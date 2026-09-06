@@ -6,6 +6,7 @@ internal static class ScancodeMap
 {
     private const string RegistryPath = @"SYSTEM\CurrentControlSet\Control\Keyboard Layout";
     private const string ValueName = "Scancode Map";
+
     public static readonly IReadOnlyDictionary<string, ushort> Targets = new Dictionary<string, ushort>
     {
         ["F13"] = 0x64, ["F14"] = 0x65, ["F15"] = 0x66, ["F16"] = 0x67,
@@ -41,6 +42,29 @@ internal static class ScancodeMap
         if (existed) mappings[source] = originalDestination;
         WriteMappings(mappings);
         AppLog.Info("Previous scancode mapping state restored. Reboot is required before Windows uses it.");
+    }
+
+    public static byte[]? ExportRawValue()
+    {
+        using var key = Registry.LocalMachine.OpenSubKey(RegistryPath, false);
+        var bytes = key?.GetValue(ValueName) as byte[];
+        AppLog.Info(bytes is null ? "Backup export: Scancode Map is absent." : $"Backup export: captured {bytes.Length} Scancode Map bytes.");
+        return bytes?.ToArray();
+    }
+
+    public static void ImportRawValue(byte[]? bytes)
+    {
+        using var key = Registry.LocalMachine.OpenSubKey(RegistryPath, true) ?? throw new InvalidOperationException("Could not open the keyboard-layout registry key.");
+        if (bytes is null)
+        {
+            key.DeleteValue(ValueName, false);
+            AppLog.Info("Backup import: removed Scancode Map because the backup had no value.");
+        }
+        else
+        {
+            key.SetValue(ValueName, bytes, RegistryValueKind.Binary);
+            AppLog.Info($"Backup import: restored {bytes.Length} raw Scancode Map bytes.");
+        }
     }
 
     private static Dictionary<ushort, ushort> ReadMappings()
