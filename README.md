@@ -17,6 +17,14 @@ GiHATE is a portable EXE, but its configuration is machine-wide and persistent a
 C:\ProgramData\GiHATE\config.json
 ```
 
+A persistent diagnostic log is stored next to that folder at:
+
+```text
+C:\ProgramData\GiHATE.log
+```
+
+Use **Open log** in GiHATE to open Explorer with the log file selected. If you report an issue, attach that file. It includes startup/environment information, detection events, PnP/device operations, scancode-map changes, restart choices, and full exception details.
+
 A Windows restart is required after applying or restoring a mapping. GiHATE defaults to **Restart now**, but you can choose to restart later.
 
 ## Giving the key a useful action
