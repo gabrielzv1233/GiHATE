@@ -1,8 +1,8 @@
-# Executable metadata and antivirus notes
+# Executable metadata, SmartScreen, and antivirus notes
 
 GiHATE changes low-level Windows keyboard and HID configuration, so an unsigned build may occasionally receive a heuristic false positive from antivirus or SmartScreen products.
 
-The project does **not** attempt to hide, obfuscate, pack, or bypass security products.
+The project does **not** attempt to hide, obfuscate, pack, inject into other processes, or bypass security products.
 
 ## Embedded executable metadata
 
@@ -10,13 +10,28 @@ Release builds include normal Windows/.NET metadata such as:
 
 - Product: `GiHATE`
 - Company / author: `Gabrielzv1233`
-- Description: `GIGABYTE GiMATE hardware button disabler and programmable key remapper.`
+- File description: `GIGABYTE GiMATE hardware button disabler and programmable key remapper.`
 - Copyright
 - Assembly, file, product, and informational versions
 - Repository/project URL
 - English-US neutral language metadata
+- A Windows manifest identifying `Gabrielzv1233.GiHATE` and Windows 10/11 compatibility
 
 Single-file compression is explicitly disabled so the executable is not unnecessarily packed.
+
+## SmartScreen / UAC publisher field
+
+The **Publisher** field shown by Windows SmartScreen or the UAC elevation prompt does not come from the `Company`, `Authors`, `Product`, or file-description metadata above.
+
+Windows considers that field verified only when the executable has a trusted **Authenticode code-signing signature**. An unsigned GitHub Actions build can therefore still show:
+
+```text
+Publisher: Unknown publisher
+```
+
+even though Explorer's file properties correctly show `Gabrielzv1233`, `GiHATE`, the version, and the description.
+
+Self-signing a certificate does not solve this for normal users because their PCs do not trust that certificate. A public release needs a publicly trusted code-signing certificate or a compatible trusted signing service to show a verified publisher on other computers.
 
 ## Reproducibility and transparency
 
