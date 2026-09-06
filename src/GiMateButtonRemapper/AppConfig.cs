@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace GiHATE;
 
@@ -26,7 +27,10 @@ public sealed class AppConfig
     public static string DirectoryPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GiHATE");
     public static string FilePath => Path.Combine(DirectoryPath, "config.json");
 
+    [JsonIgnore]
     public bool IsRestartPending => RestartRequired && BootSession.IsSameBoot(RestartBootId);
+
+    [JsonIgnore]
     public bool RestartOccurred => RestartRequired && !string.IsNullOrWhiteSpace(RestartBootId) && !BootSession.IsSameBoot(RestartBootId);
 
     public void MarkRestartRequired(
