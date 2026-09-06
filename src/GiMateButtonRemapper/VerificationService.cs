@@ -36,13 +36,29 @@ internal static class VerificationService
 
         var hidDisabled = DeviceManager.IsDisabled(config.Profile.VendorInstanceId);
         var mapping = ScancodeMap.GetSourceMapping(config.Profile.SourceScanCode);
-        var expectedMappingExists = config.RestartRequired
-            ? config.PendingExpectedMappingExists
-            : config.Applied;
-        var expectedDestination = config.RestartRequired
-            ? config.PendingExpectedMappingDestination
-            : ScancodeMap.Targets.TryGetValue(config.TargetKey, out var target) ? target : (ushort)0;
-        var expectedHidDisabled = config.RestartRequired ? config.PendingExpectedHidDisabled : config.Applied;
+
+        bool expectedMappingExists;
+        ushort expectedDestination;
+        bool expectedHidDisabled;
+
+        if (config.RestartRequired)
+        {
+            expectedMappingExists = config.PendingExpectedMappingExists;
+            expectedDestination = config.PendingExpectedMappingDestination;
+            expectedHidDisabled = config.PendingExpectedHidDisabled;
+        }
+        else if (config.Applied)
+        {
+            expectedMappingExists = true;
+            expectedDestination = ScancodeMap.Targets.TryGetValue(config.TargetKey, out var target) ? target : (ushort)0;
+            expectedHidDisabled = true;
+        }
+        else
+        {
+            expectedMappingExists = config.OriginalMappingCaptured && config.HadOriginalSourceMapping;
+            expectedDestination = config.OriginalMappingCaptured ? config.OriginalSourceDestination : (ushort)0;
+            expectedHidDisabled = false;
+        }
 
         var mappingMatches = expectedMappingExists
             ? mapping.Exists && mapping.Destination == expectedDestination
