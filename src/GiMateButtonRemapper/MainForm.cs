@@ -13,6 +13,8 @@ public sealed class MainForm : Form
     private readonly Button _knownProfile = new();
     private readonly Button _apply = new();
     private readonly Button _restore = new();
+    private readonly Button _openLog = new();
+    private bool _busy;
 
     public MainForm()
     {
@@ -23,11 +25,20 @@ public sealed class MainForm : Form
         Font = new Font("Segoe UI", 10);
         AutoScaleMode = AutoScaleMode.Dpi;
 
+        AppLog.Info("Constructing main window");
         BuildUi();
         Shown += (_, _) =>
         {
-            try { _raw.Register(Handle); }
-            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Raw Input registration failed", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            try
+            {
+                _raw.Register(Handle);
+                AppLog.Info($"Raw Input registered to main window handle 0x{Handle.ToInt64():X}.");
+            }
+            catch (Exception ex)
+            {
+                AppLog.Exception("Raw Input registration failed", ex);
+                MessageBox.Show(this, ex.Message, "Raw Input registration failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
             RefreshUi();
         };
     }
@@ -60,21 +71,19 @@ public sealed class MainForm : Form
             root.Controls.Add(control, 0, row);
         }
 
-        var title = new Label
+        AddRow(new Label
         {
             Text = "GiHATE",
             Font = new Font("Segoe UI", 26, FontStyle.Bold),
             AutoSize = true
-        };
-        AddRow(title);
+        });
 
-        var subtitle = new Label
+        AddRow(new Label
         {
             Text = "Turn the dedicated GiMATE button into a normal programmable Windows key while keeping GIGABYTE software installed.",
             AutoSize = true,
             MaximumSize = new Size(760, 0)
-        };
-        AddRow(subtitle, 2);
+        }, 2);
 
         var statusPanel = new TableLayoutPanel
         {
@@ -210,50 +219,87 @@ public sealed class MainForm : Form
         _apply.AutoSize = true;
         _apply.MinimumSize = new Size(140, 42);
         _apply.Margin = new Padding(0, 0, 10, 0);
-        _apply.Click += (_, _) => ApplyConfiguration();
+        _apply.Click += async (_, _) => await ApplyConfigurationAsync();
 
         _restore.Text = "Restore GiMATE";
         _restore.AutoSize = true;
         _restore.MinimumSize = new Size(165, 42);
         _restore.Margin = new Padding(0);
-        _restore.Click += (_, _) => RestoreConfiguration();
+        _restore.Click += async (_, _) => await RestoreConfigurationAsync();
 
         actionFlow.Controls.Add(_apply);
         actionFlow.Controls.Add(_restore);
         AddRow(actionFlow, 22);
 
+        var utilityFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            Margin = new Padding(0)
+        };
+
         var configButton = new Button
         {
             Text = "Open config folder",
             AutoSize = true,
-            Padding = new Padding(10, 4, 10, 4)
+            Padding = new Padding(10, 4, 10, 4),
+            Margin = new Padding(0, 0, 10, 0)
         };
         configButton.Click += (_, _) =>
         {
-            Directory.CreateDirectory(AppConfig.DirectoryPath);
-            Process.Start(new ProcessStartInfo("explorer.exe", AppConfig.DirectoryPath) { UseShellExecute = true });
+            try
+            {
+                Directory.CreateDirectory(AppConfig.DirectoryPath);
+                AppLog.Info("Opening config folder in Explorer.");
+                Process.Start(new ProcessStartInfo("explorer.exe", AppConfig.DirectoryPath) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                AppLog.Exception("Failed to open config folder", ex);
+                MessageBox.Show(this, ex.Message, "Could not open config folder", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         };
-        AddRow(configButton, 14);
 
-        var footer = new Label
+        _openLog.Text = "Open log";
+        _openLog.AutoSize = true;
+        _openLog.Padding = new Padding(10, 4, 10, 4);
+        _openLog.Margin = new Padding(0);
+        _openLog.Click += (_, _) =>
         {
-            Text = $"Publisher metadata: {Application.CompanyName}    Version: {Application.ProductVersion}\nConfig: {AppConfig.FilePath}",
+            try { AppLog.OpenInExplorer(); }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Could not open log", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        };
+
+        utilityFlow.Controls.Add(configButton);
+        utilityFlow.Controls.Add(_openLog);
+        AddRow(utilityFlow, 14);
+
+        AddRow(new Label
+        {
+            Text = $"Publisher metadata: {Application.CompanyName}    Version: {Application.ProductVersion}\nConfig: {AppConfig.FilePath}\nIssue log: {AppLog.LogPath}",
             AutoSize = true,
             MaximumSize = new Size(760, 0),
             ForeColor = SystemColors.GrayText,
             Font = new Font("Segoe UI", 8.5f)
-        };
-        AddRow(footer, 22);
+        }, 22);
     }
 
     private void RefreshUi()
     {
+        if (_busy) return;
+
         if (_config.Profile is null)
         {
             _status.Text = "Status: Not configured";
             _detail.Text = "Run detection first. Detection opens in its own guided window with a live 0/3 press counter and a separate keyboard safety-check step.";
             _apply.Enabled = false;
             _restore.Enabled = _config.Applied;
+            _detect.Enabled = true;
+            _knownProfile.Enabled = true;
+            _target.Enabled = true;
             return;
         }
 
@@ -263,18 +309,26 @@ public sealed class MainForm : Form
             (deviceState is null ? "" : $"\nPnP status bits: 0x{deviceState.Value.Status:X8}, problem: {deviceState.Value.Problem}");
         _apply.Enabled = true;
         _restore.Enabled = _config.Applied;
+        _detect.Enabled = true;
+        _knownProfile.Enabled = true;
+        _target.Enabled = true;
     }
 
     private void StartDetection()
     {
+        AppLog.Info("Guided detection requested.");
         using var wizard = new DetectionWizardForm(_raw, Handle);
         if (wizard.ShowDialog(this) != DialogResult.OK || wizard.ResultProfile is null)
+        {
+            AppLog.Info("Guided detection cancelled or did not produce a profile.");
             return;
+        }
 
         _config.Profile = wizard.ResultProfile;
         _config.Save();
         RefreshUi();
 
+        AppLog.Info($"Detection accepted: scan=0x{wizard.ResultProfile.SourceScanCode:X2}, vendor={wizard.ResultProfile.VendorInstanceId}, report={wizard.ResultProfile.VendorReportHex}");
         MessageBox.Show(
             this,
             $"Detected scan code 0x{wizard.ResultProfile.SourceScanCode:X2} and vendor HID report {wizard.ResultProfile.VendorReportHex}.\n\nNothing has been changed yet. Choose a replacement key and click Apply when ready.",
@@ -285,16 +339,21 @@ public sealed class MainForm : Form
 
     private void AdoptKnownProfile()
     {
+        AppLog.Info("Tested Master 16 profile adoption requested.");
         var vendor = DeviceManager.FindInstanceIds(@"HID\VID_0414&PID_8100&MI_02&COL04\");
         var keyboard = DeviceManager.FindInstanceIds(@"HID\VID_0414&PID_8100&MI_00\");
         if (vendor.Count != 1 || keyboard.Count < 1)
         {
+            AppLog.Warn($"Known profile unavailable. vendor matches={vendor.Count}, keyboard matches={keyboard.Count}.");
             MessageBox.Show(this, "The exact tested AORUS Master 16 device layout was not found unambiguously. Use guided detection instead.", "Known profile not available", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
         if (MessageBox.Show(this, "GiHATE found the exact VID/PID/interface layout used on the tested AORUS Master 16 AM6H.\n\nThis shortcut assumes scan 0x59 and vendor report 04 00 00 91. Continue?", "Adopt tested Master 16 profile", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        {
+            AppLog.Info("Known profile adoption cancelled by user.");
             return;
+        }
 
         _config.Profile = new DetectedProfile
         {
@@ -308,71 +367,133 @@ public sealed class MainForm : Form
             VendorReportHex = "04 00 00 91"
         };
         _config.Save();
+        AppLog.Info($"Known profile adopted. Keyboard={keyboard[0]}, Vendor={vendor[0]}");
         RefreshUi();
     }
 
-    private void ApplyConfiguration()
+    private async Task ApplyConfigurationAsync()
     {
-        if (_config.Profile is null)
-            return;
+        if (_config.Profile is null || _busy) return;
 
         var targetName = _target.SelectedItem?.ToString() ?? "F24";
-        if (!ScancodeMap.Targets.TryGetValue(targetName, out var destination))
-            return;
+        if (!ScancodeMap.Targets.TryGetValue(targetName, out var destination)) return;
+
+        SetBusy(true, "Applying...");
+        await Task.Yield();
 
         try
         {
+            AppLog.Info($"===== APPLY START ===== target={targetName}, sourceScan=0x{_config.Profile.SourceScanCode:X2}");
+            AppLog.Info($"Keyboard instance: {_config.Profile.KeyboardInstanceId}");
+            AppLog.Info($"Vendor instance: {_config.Profile.VendorInstanceId}");
+
             if (!_config.Applied)
             {
                 var original = ScancodeMap.GetSourceMapping(_config.Profile.SourceScanCode);
                 _config.HadOriginalSourceMapping = original.Exists;
                 _config.OriginalSourceDestination = original.Destination;
+                AppLog.Info($"Captured original source mapping. Exists={original.Exists}, Destination=0x{original.Destination:X4}");
             }
 
-            DeviceManager.DisablePersistent(_config.Profile.VendorInstanceId);
+            var deviceResult = DeviceManager.DisablePersistent(_config.Profile.VendorInstanceId);
+            AppLog.Info($"Vendor HID disable accepted via {deviceResult.Method}. Pending-reboot path={deviceResult.RestartRequired}");
+
             ScancodeMap.SetMapping(_config.Profile.SourceScanCode, destination);
             _config.TargetKey = targetName;
             _config.Applied = true;
             _config.Save();
+            AppLog.Info("===== APPLY SUCCESS =====");
 
             using var prompt = new RestartPromptForm($"GiHATE disabled the vendor HID trigger and mapped scan 0x{_config.Profile.SourceScanCode:X2} to {targetName}.");
-            if (prompt.ShowDialog(this) == DialogResult.OK && prompt.RestartNow)
+            var dialogResult = prompt.ShowDialog(this);
+            AppLog.Info($"Restart prompt closed. DialogResult={dialogResult}, RestartNow={prompt.RestartNow}");
+            if (dialogResult == DialogResult.OK && prompt.RestartNow)
+            {
+                AppLog.Info("Restart now selected. Requesting Windows restart.");
                 RestartWindows();
-            else
-                RefreshUi();
+            }
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Apply failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            AppLog.Exception("Apply failed", ex);
+            MessageBox.Show(
+                this,
+                $"{ex.Message}\n\nFull diagnostic details were written to:\n{AppLog.LogPath}",
+                "Apply failed",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+            RefreshUi();
         }
     }
 
-    private void RestoreConfiguration()
+    private async Task RestoreConfigurationAsync()
     {
-        if (_config.Profile is null)
-            return;
+        if (_config.Profile is null || _busy) return;
 
         if (MessageBox.Show(this, "This will re-enable the GiMATE vendor HID interface and restore the previous mapping for this scan code. Continue?", "Restore GiMATE", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        {
+            AppLog.Info("Restore cancelled by user.");
             return;
+        }
+
+        SetBusy(true, "Restoring...");
+        await Task.Yield();
 
         try
         {
-            DeviceManager.Enable(_config.Profile.VendorInstanceId);
+            AppLog.Info("===== RESTORE START =====");
+            var deviceResult = DeviceManager.Enable(_config.Profile.VendorInstanceId);
+            AppLog.Info($"Vendor HID enable accepted via {deviceResult.Method}. Pending-reboot path={deviceResult.RestartRequired}");
             ScancodeMap.RestoreSource(_config.Profile.SourceScanCode, _config.HadOriginalSourceMapping, _config.OriginalSourceDestination);
             _config.Applied = false;
             _config.Save();
+            AppLog.Info("===== RESTORE SUCCESS =====");
 
             using var prompt = new RestartPromptForm("GiHATE restored the original GiMATE device path and scan-code mapping.");
-            if (prompt.ShowDialog(this) == DialogResult.OK && prompt.RestartNow)
+            var dialogResult = prompt.ShowDialog(this);
+            AppLog.Info($"Restore restart prompt closed. DialogResult={dialogResult}, RestartNow={prompt.RestartNow}");
+            if (dialogResult == DialogResult.OK && prompt.RestartNow)
+            {
+                AppLog.Info("Restart now selected after restore. Requesting Windows restart.");
                 RestartWindows();
-            else
-                RefreshUi();
+            }
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Restore failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            AppLog.Exception("Restore failed", ex);
+            MessageBox.Show(
+                this,
+                $"{ex.Message}\n\nFull diagnostic details were written to:\n{AppLog.LogPath}",
+                "Restore failed",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+            RefreshUi();
         }
     }
 
-    private static void RestartWindows() => Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false, CreateNoWindow = true });
+    private void SetBusy(bool busy, string? applyText = null)
+    {
+        _busy = busy;
+        UseWaitCursor = busy;
+        _apply.Enabled = !busy;
+        _restore.Enabled = !busy && _config.Applied;
+        _detect.Enabled = !busy;
+        _knownProfile.Enabled = !busy;
+        _target.Enabled = !busy;
+        _openLog.Enabled = true;
+        _apply.Text = busy ? applyText ?? "Working..." : "Apply";
+    }
+
+    private static void RestartWindows()
+    {
+        Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false, CreateNoWindow = true });
+    }
 }
