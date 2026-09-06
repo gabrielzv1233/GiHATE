@@ -172,12 +172,19 @@ internal sealed class AdvancedForm : Form
             return;
         }
 
-        var hid = result.HidDisabled switch { true => "Disabled", false => "Enabled", null => "Unknown" };
+        var liveHid = result.HidDisabled switch { true => "Disabled", false => "Enabled", null => "Unknown" };
+        var persistent = result.PersistentDisableFlagSet switch { true => "Disable scheduled / persistent", false => "Clear", null => "Unknown" };
         var mapping = result.MappingExists ? $"0x{_config.Profile.SourceScanCode:X2} -> 0x{result.MappingDestination:X2}" : $"0x{_config.Profile.SourceScanCode:X2} -> no mapping";
         var restart = result.RestartPending ? $"Required ({_config.RestartReason})" : result.RestartOccurred ? "Restart occurred; verification pending/completed" : "Not pending";
         var gigabyte = result.GigabyteReady ? string.Join(", ", result.GigabyteProcesses) : "No known listener detected";
 
-        _systemStatus.Text = $"GiMATE vendor HID: {hid}\nScancode mapping: {mapping}\nRestart: {restart}\nGIGABYTE listener: {gigabyte}\nVerification task: {(VerificationTask.Exists(_config.VerificationTaskName) ? "Scheduled" : "Not scheduled")}";
+        _systemStatus.Text =
+            $"GiMATE vendor HID now: {liveHid}\n" +
+            $"Persistent HID disable flag: {persistent}\n" +
+            $"Scancode mapping: {mapping}\n" +
+            $"Restart: {restart}\n" +
+            $"GIGABYTE listener: {gigabyte}\n" +
+            $"Verification task: {(VerificationTask.Exists(_config.VerificationTaskName) ? "Scheduled" : "Not scheduled")}";
     }
 
     private void ExportBackup()
