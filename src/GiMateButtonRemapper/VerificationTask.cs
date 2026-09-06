@@ -12,7 +12,7 @@ internal static class VerificationTask
         {
             var exe = Environment.ProcessPath ?? throw new InvalidOperationException("Could not determine the GiHATE executable path.");
             var taskName = DefaultTaskName;
-            var command = $"\"{exe}\" --verify --from-task --task-name \"{taskName}\"";
+            var command = $"\"{exe}\" --verify --from-task";
 
             var result = RunSchtasks(
                 "/Create",
