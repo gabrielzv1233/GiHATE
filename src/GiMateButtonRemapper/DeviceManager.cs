@@ -17,6 +17,7 @@ internal static class DeviceManager
     private const uint ConfigFlagDisabled = 0x00000001;
     private const int ErrorInvalidData = 13;
     private const int ErrorFileNotFound = 2;
+    private const uint CmProbDisabled = 22;
     private static readonly IntPtr InvalidHandleValue = new(-1);
 
     public static DeviceChangeResult DisablePersistent(string instanceId)
@@ -67,8 +68,6 @@ internal static class DeviceManager
     {
         AppLog.Info($"Device enable requested: {instanceId}");
 
-        // Clear our persistent disabled bit first. This also cancels a disable
-        // that was scheduled but has not reached a reboot yet.
         try
         {
             SetPersistentDisabledFlag(instanceId, disabled: false);
@@ -163,6 +162,49 @@ internal static class DeviceManager
         }
     }
 
+    public static uint? GetPersistentConfigFlags(string instanceId)
+    {
+        try
+        {
+            var (deviceInfoSet, deviceInfo) = OpenDeviceInfo(instanceId);
+            try
+            {
+                var buffer = new byte[sizeof(uint)];
+                if (SetupDiGetDeviceRegistryPropertyW(deviceInfoSet, ref deviceInfo, SpdrpConfigFlags, out _, buffer, (uint)buffer.Length, out _))
+                    return BitConverter.ToUInt32(buffer, 0);
+
+                var error = Marshal.GetLastWin32Error();
+                if (error is ErrorInvalidData or ErrorFileNotFound)
+                    return 0;
+                throw new Win32Exception(error, "SetupDiGetDeviceRegistryPropertyW(SPDRP_CONFIGFLAGS) failed.");
+            }
+            finally
+            {
+                SetupDiDestroyDeviceInfoList(deviceInfoSet);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Exception($"Could not query ConfigFlags for '{instanceId}'", ex);
+            return null;
+        }
+    }
+
+    public static bool? IsDisabled(string instanceId)
+    {
+        var status = GetStatus(instanceId);
+        var flags = GetPersistentConfigFlags(instanceId);
+        if (status is not null && status.Value.Problem == CmProbDisabled)
+            return true;
+        if (flags is not null && (flags.Value & ConfigFlagDisabled) != 0)
+            return true;
+        if (status is not null && flags is not null)
+            return false;
+        return null;
+    }
+
+    public static void SetPersistentDisabledState(string instanceId, bool disabled) => SetPersistentDisabledFlag(instanceId, disabled);
+
     private static uint Locate(string instanceId, bool allowPhantom = false)
     {
         const uint CmLocateDevnodePhantom = 0x00000001;
@@ -238,8 +280,6 @@ internal static class DeviceManager
 
     private static (IntPtr DeviceInfoSet, SP_DEVINFO_DATA DeviceInfo) OpenDeviceInfo(string instanceId)
     {
-        // Do not require DIGCF_PRESENT here. Revert must be able to find a
-        // disabled/non-started device and clear a pending persistent flag.
         var deviceInfoSet = SetupDiGetClassDevsW(IntPtr.Zero, null, IntPtr.Zero, DigcfAllClasses);
         if (deviceInfoSet == InvalidHandleValue)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "SetupDiGetClassDevsW failed.");
