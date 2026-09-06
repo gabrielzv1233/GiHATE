@@ -6,15 +6,17 @@ namespace GiHATE;
 internal static class DeviceManager
 {
     private const uint CrSuccess = 0;
-    private const uint CrRemoveVetoed = 0x17;
     private const uint CmDisablePersist = 0x00000008;
 
-    private const uint DigcfPresent = 0x00000002;
     private const uint DigcfAllClasses = 0x00000004;
     private const uint DifPropertyChange = 0x00000012;
     private const uint DicsEnable = 0x00000001;
     private const uint DicsDisable = 0x00000002;
     private const uint DicsFlagGlobal = 0x00000001;
+    private const uint SpdrpConfigFlags = 0x0000000A;
+    private const uint ConfigFlagDisabled = 0x00000001;
+    private const int ErrorInvalidData = 13;
+    private const int ErrorFileNotFound = 2;
     private static readonly IntPtr InvalidHandleValue = new(-1);
 
     public static DeviceChangeResult DisablePersistent(string instanceId)
@@ -32,7 +34,7 @@ internal static class DeviceManager
             return new DeviceChangeResult("CfgMgr32", false);
         }
 
-        AppLog.Warn($"CM_Disable_DevNode returned {DescribeConfigRet(result)} (0x{result:X8}). Falling back to SetupAPI DIF_PROPERTYCHANGE/DICS_DISABLE so Windows can schedule the state change across reboot.");
+        AppLog.Warn($"CM_Disable_DevNode returned {DescribeConfigRet(result)} (0x{result:X8}). Trying SetupAPI DIF_PROPERTYCHANGE/DICS_DISABLE.");
 
         try
         {
@@ -40,18 +42,43 @@ internal static class DeviceManager
             AppLog.Info("SetupAPI disable request succeeded. The device change may remain pending until reboot.");
             return new DeviceChangeResult("SetupAPI", true);
         }
-        catch (Exception ex)
+        catch (Exception setupEx)
         {
-            AppLog.Exception($"SetupAPI disable fallback failed after CONFIGRET 0x{result:X8}", ex);
-            throw new InvalidOperationException(
-                $"Could not disable the GiMATE vendor HID device. CfgMgr32 returned {DescribeConfigRet(result)} (0x{result:X8}) and the SetupAPI fallback also failed. See {AppLog.LogPath} for full details.",
-                ex);
+            AppLog.Exception($"SetupAPI live disable failed after CONFIGRET 0x{result:X8}", setupEx);
+            AppLog.Warn("Scheduling the disable for next boot by setting CONFIGFLAG_DISABLED through SetupAPI.");
+
+            try
+            {
+                SetPersistentDisabledFlag(instanceId, disabled: true);
+                AppLog.Info("CONFIGFLAG_DISABLED is set. The GiMATE vendor HID will be disabled when Windows restarts.");
+                return new DeviceChangeResult("SetupAPI ConfigFlags", true);
+            }
+            catch (Exception flagEx)
+            {
+                AppLog.Exception("Persistent CONFIGFLAG_DISABLED fallback failed", flagEx);
+                throw new InvalidOperationException(
+                    $"Could not disable or schedule disable of the GiMATE vendor HID device. CfgMgr32 returned {DescribeConfigRet(result)} (0x{result:X8}), the live SetupAPI change failed, and the persistent ConfigFlags fallback failed. See {AppLog.LogPath} for full details.",
+                    new AggregateException(setupEx, flagEx));
+            }
         }
     }
 
     public static DeviceChangeResult Enable(string instanceId)
     {
         AppLog.Info($"Device enable requested: {instanceId}");
+
+        // Clear our persistent disabled bit first. This also cancels a disable
+        // that was scheduled but has not reached a reboot yet.
+        try
+        {
+            SetPersistentDisabledFlag(instanceId, disabled: false);
+            AppLog.Info("CONFIGFLAG_DISABLED cleared before enable attempt.");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Exception("Could not clear CONFIGFLAG_DISABLED before live enable; continuing with normal enable paths", ex);
+        }
+
         var devInst = Locate(instanceId, allowPhantom: true);
         var result = CM_Enable_DevNode(devInst, 0);
         if (result == CrSuccess)
@@ -60,7 +87,7 @@ internal static class DeviceManager
             return new DeviceChangeResult("CfgMgr32", false);
         }
 
-        AppLog.Warn($"CM_Enable_DevNode returned {DescribeConfigRet(result)} (0x{result:X8}). Falling back to SetupAPI DIF_PROPERTYCHANGE/DICS_ENABLE.");
+        AppLog.Warn($"CM_Enable_DevNode returned {DescribeConfigRet(result)} (0x{result:X8}). Trying SetupAPI DIF_PROPERTYCHANGE/DICS_ENABLE.");
 
         try
         {
@@ -68,12 +95,23 @@ internal static class DeviceManager
             AppLog.Info("SetupAPI enable request succeeded. The device change may remain pending until reboot.");
             return new DeviceChangeResult("SetupAPI", true);
         }
-        catch (Exception ex)
+        catch (Exception setupEx)
         {
-            AppLog.Exception($"SetupAPI enable fallback failed after CONFIGRET 0x{result:X8}", ex);
-            throw new InvalidOperationException(
-                $"Could not re-enable the GiMATE vendor HID device. CfgMgr32 returned {DescribeConfigRet(result)} (0x{result:X8}) and the SetupAPI fallback also failed. See {AppLog.LogPath} for full details.",
-                ex);
+            AppLog.Exception($"SetupAPI live enable failed after CONFIGRET 0x{result:X8}", setupEx);
+
+            try
+            {
+                SetPersistentDisabledFlag(instanceId, disabled: false);
+                AppLog.Info("Persistent disabled bit is cleared. The device should return after reboot.");
+                return new DeviceChangeResult("SetupAPI ConfigFlags", true);
+            }
+            catch (Exception flagEx)
+            {
+                AppLog.Exception("Persistent ConfigFlags enable fallback failed", flagEx);
+                throw new InvalidOperationException(
+                    $"Could not re-enable or schedule re-enable of the GiMATE vendor HID device. CfgMgr32 returned {DescribeConfigRet(result)} (0x{result:X8}), the live SetupAPI change failed, and the persistent ConfigFlags fallback failed. See {AppLog.LogPath} for full details.",
+                    new AggregateException(setupEx, flagEx));
+            }
         }
     }
 
@@ -138,17 +176,10 @@ internal static class DeviceManager
     private static void SetupApiPropertyChange(string instanceId, bool disable)
     {
         AppLog.Info($"SetupAPI property change: {(disable ? "disable" : "enable")} '{instanceId}'");
-
-        var deviceInfoSet = SetupDiGetClassDevsW(IntPtr.Zero, null, IntPtr.Zero, DigcfPresent | DigcfAllClasses);
-        if (deviceInfoSet == InvalidHandleValue)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "SetupDiGetClassDevsW failed.");
+        var (deviceInfoSet, deviceInfo) = OpenDeviceInfo(instanceId);
 
         try
         {
-            var deviceInfo = new SP_DEVINFO_DATA { cbSize = (uint)Marshal.SizeOf<SP_DEVINFO_DATA>() };
-            if (!SetupDiOpenDeviceInfoW(deviceInfoSet, instanceId, IntPtr.Zero, 0, ref deviceInfo))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), $"SetupDiOpenDeviceInfoW failed for '{instanceId}'.");
-
             var propertyChange = new SP_PROPCHANGE_PARAMS
             {
                 ClassInstallHeader = new SP_CLASSINSTALL_HEADER
@@ -173,6 +204,55 @@ internal static class DeviceManager
         }
     }
 
+    private static void SetPersistentDisabledFlag(string instanceId, bool disabled)
+    {
+        var (deviceInfoSet, deviceInfo) = OpenDeviceInfo(instanceId);
+
+        try
+        {
+            var buffer = new byte[sizeof(uint)];
+            uint configFlags = 0;
+            if (SetupDiGetDeviceRegistryPropertyW(deviceInfoSet, ref deviceInfo, SpdrpConfigFlags, out _, buffer, (uint)buffer.Length, out _))
+            {
+                configFlags = BitConverter.ToUInt32(buffer, 0);
+            }
+            else
+            {
+                var error = Marshal.GetLastWin32Error();
+                if (error != ErrorInvalidData && error != ErrorFileNotFound)
+                    throw new Win32Exception(error, "SetupDiGetDeviceRegistryPropertyW(SPDRP_CONFIGFLAGS) failed.");
+            }
+
+            var updated = disabled ? configFlags | ConfigFlagDisabled : configFlags & ~ConfigFlagDisabled;
+            AppLog.Info($"Device ConfigFlags: 0x{configFlags:X8} -> 0x{updated:X8} ({(disabled ? "set" : "clear")} CONFIGFLAG_DISABLED)");
+
+            var updatedBytes = BitConverter.GetBytes(updated);
+            if (!SetupDiSetDeviceRegistryPropertyW(deviceInfoSet, ref deviceInfo, SpdrpConfigFlags, updatedBytes, (uint)updatedBytes.Length))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "SetupDiSetDeviceRegistryPropertyW(SPDRP_CONFIGFLAGS) failed.");
+        }
+        finally
+        {
+            SetupDiDestroyDeviceInfoList(deviceInfoSet);
+        }
+    }
+
+    private static (IntPtr DeviceInfoSet, SP_DEVINFO_DATA DeviceInfo) OpenDeviceInfo(string instanceId)
+    {
+        // Do not require DIGCF_PRESENT here. Revert must be able to find a
+        // disabled/non-started device and clear a pending persistent flag.
+        var deviceInfoSet = SetupDiGetClassDevsW(IntPtr.Zero, null, IntPtr.Zero, DigcfAllClasses);
+        if (deviceInfoSet == InvalidHandleValue)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "SetupDiGetClassDevsW failed.");
+
+        var deviceInfo = new SP_DEVINFO_DATA { cbSize = (uint)Marshal.SizeOf<SP_DEVINFO_DATA>() };
+        if (SetupDiOpenDeviceInfoW(deviceInfoSet, instanceId, IntPtr.Zero, 0, ref deviceInfo))
+            return (deviceInfoSet, deviceInfo);
+
+        var error = Marshal.GetLastWin32Error();
+        SetupDiDestroyDeviceInfoList(deviceInfoSet);
+        throw new Win32Exception(error, $"SetupDiOpenDeviceInfoW failed for '{instanceId}'.");
+    }
+
     private static string DescribeConfigRet(uint value) => value switch
     {
         0x00 => "CR_SUCCESS",
@@ -180,7 +260,7 @@ internal static class DeviceManager
         0x0D => "CR_NO_SUCH_DEVNODE",
         0x13 => "CR_FAILURE",
         0x15 => "CR_CREATE_BLOCKED",
-        CrRemoveVetoed => "CR_REMOVE_VETOED",
+        0x17 => "CR_REMOVE_VETOED",
         0x1D => "CR_REGISTRY_ERROR",
         0x33 => "CR_ACCESS_DENIED",
         0x34 => "CR_CALL_NOT_IMPLEMENTED",
@@ -223,6 +303,8 @@ internal static class DeviceManager
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool SetupDiOpenDeviceInfoW(IntPtr DeviceInfoSet, string DeviceInstanceId, IntPtr hwndParent, uint OpenFlags, ref SP_DEVINFO_DATA DeviceInfoData);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool SetupDiSetClassInstallParamsW(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData, ref SP_PROPCHANGE_PARAMS ClassInstallParams, int ClassInstallParamsSize);
     [DllImport("setupapi.dll", SetLastError = true)] private static extern bool SetupDiCallClassInstaller(uint InstallFunction, IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData);
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool SetupDiGetDeviceRegistryPropertyW(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData, uint Property, out uint PropertyRegDataType, [Out] byte[] PropertyBuffer, uint PropertyBufferSize, out uint RequiredSize);
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool SetupDiSetDeviceRegistryPropertyW(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData, uint Property, byte[] PropertyBuffer, uint PropertyBufferSize);
     [DllImport("setupapi.dll", SetLastError = true)] private static extern bool SetupDiDestroyDeviceInfoList(IntPtr DeviceInfoSet);
 }
 
