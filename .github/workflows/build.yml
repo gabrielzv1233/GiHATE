@@ -2,6 +2,12 @@ name: Build
 
 on:
   workflow_dispatch:
+    inputs:
+      clean_build:
+        description: 'Clean build (ignore saved NuGet/runtime package cache)'
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -9,12 +15,37 @@ jobs:
     permissions:
       contents: read
 
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}\.nuget\packages
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+      NUGET_XMLDOC_MODE: skip
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-dotnet@v4
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Restore NuGet/runtime package cache
+        if: ${{ !inputs.clean_build }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/packages.lock.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Clean package directory
+        if: ${{ inputs.clean_build }}
+        shell: pwsh
+        run: |
+          if (Test-Path $env:NUGET_PACKAGES) {
+            Remove-Item $env:NUGET_PACKAGES -Recurse -Force
+          }
+          Write-Host 'Clean build requested: saved NuGet/runtime package cache will not be restored.'
 
       - name: Publish single-file executable
         shell: pwsh
