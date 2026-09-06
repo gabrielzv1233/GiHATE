@@ -35,18 +35,23 @@ internal static class BackupManager
         var raw = string.IsNullOrWhiteSpace(backup.ScancodeMapBase64) ? null : Convert.FromBase64String(backup.ScancodeMapBase64);
         ScancodeMap.ImportRawValue(raw);
 
+        var expectedHidDisabled = backup.Config.Applied;
         if (backup.Config.Profile is not null && backup.VendorConfigFlags is not null)
         {
-            var disabled = (backup.VendorConfigFlags.Value & 0x00000001u) != 0;
-            DeviceManager.SetPersistentDisabledState(backup.Config.Profile.VendorInstanceId, disabled);
-            AppLog.Info($"Backup import restored vendor CONFIGFLAG_DISABLED={disabled}.");
+            expectedHidDisabled = (backup.VendorConfigFlags.Value & 0x00000001u) != 0;
+            DeviceManager.SetPersistentDisabledState(backup.Config.Profile.VendorInstanceId, expectedHidDisabled);
+            AppLog.Info($"Backup import restored vendor CONFIGFLAG_DISABLED={expectedHidDisabled}.");
         }
+
+        var mapping = backup.Config.Profile is null
+            ? (Exists: false, Destination: (ushort)0)
+            : ScancodeMap.GetSourceMapping(backup.Config.Profile.SourceScanCode);
 
         backup.Config.MarkRestartRequired(
             "Backup import",
-            expectedHidDisabled: backup.Config.Applied,
-            expectedMappingExists: backup.Config.Profile is not null && ScancodeMap.GetSourceMapping(backup.Config.Profile.SourceScanCode).Exists,
-            expectedMappingDestination: backup.Config.Profile is null ? (ushort)0 : ScancodeMap.GetSourceMapping(backup.Config.Profile.SourceScanCode).Destination);
+            expectedHidDisabled,
+            expectedMappingExists: mapping.Exists,
+            expectedMappingDestination: mapping.Destination);
         backup.Config.Save();
 
         AppLog.Info($"Backup imported from '{path}'. ExportedAt={backup.ExportedAt}, ExportedBy={backup.ExportedByVersion}/{backup.ExportedByCommit}");
