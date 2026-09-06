@@ -19,6 +19,21 @@ C:\ProgramData\GiHATE\config.json
 
 A Windows restart is required after applying or restoring a mapping. GiHATE defaults to **Restart now**, but you can choose to restart later.
 
+## Giving the key a useful action
+
+**F24 is the recommended/default GiMATE replacement key.** Windows and PowerToys support F13-F24 even though most keyboards do not physically include them.
+
+For ordinary key actions, you can remap F24 directly in **PowerToys Keyboard Manager**.
+
+PowerToys requires a shortcut with a modifier such as Shift, Ctrl, Alt, or Win for actions such as **Start App** and **Open URI**. A simple workaround is:
+
+1. In **Remap a key**, map `F24` -> `Shift + F24`.
+2. In **Remap a shortcut**, map `Shift + F24` -> **Start App** or **Open URI**.
+
+Example: the original test setup uses `Shift + F24` to launch PowerShell.
+
+See [PowerToys setup](docs/POWERTOYS.md) for the exact steps.
+
 ## Tested hardware
 
 Built and tested on an **AORUS Master 16 AM6H**. Other GIGABYTE laptops should use the guided detection flow instead of assuming the same device IDs.
@@ -29,6 +44,8 @@ More detail:
 - [Detection and safety](docs/DETECTION.md)
 - [Tested hardware / original investigation](docs/TESTED-HARDWARE.md)
 - [Limitations and risks](docs/LIMITATIONS.md)
+- [PowerToys setup](docs/POWERTOYS.md)
+- [Executable metadata and antivirus notes](docs/ANTIVIRUS.md)
 
 ## Build
 
