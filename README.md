@@ -15,7 +15,8 @@ GiHATE turns the dedicated GIGABYTE **GiMATE** button into a normal programmable
 3. Safety-checks the detection against a normal keyboard key.
 4. Disables only the GiMATE vendor HID collection.
 5. Remaps the surviving scan code to **F24 by default**.
-6. After reboot, you can map F24 to whatever you want with PowerToys Keyboard Manager or another remapper.
+6. Requires one Windows restart for the HID/scancode changes to become active.
+7. Runs a one-shot post-restart verifier that checks the HID state, scan mapping, and whether known GIGABYTE listener software is actually running.
 
 GiHATE is a portable EXE, but its configuration is machine-wide and persistent at:
 
@@ -23,15 +24,17 @@ GiHATE is a portable EXE, but its configuration is machine-wide and persistent a
 C:\ProgramData\GiHATE\config.json
 ```
 
-A persistent diagnostic log is stored next to that folder at:
+Logs are stored at:
 
 ```text
-C:\ProgramData\GiHATE.log
+C:\ProgramData\GiHATE\logs\latest.log
 ```
 
-Use **Open log** in GiHATE to open Explorer with the log file selected. If you report an issue, attach that file. It includes startup/environment information, detection events, PnP/device operations, scancode-map changes, restart choices, and full exception details.
+When GiHATE starts a new normal/verification session, the previous `latest.log` is archived as a timestamped `.log` file in the same folder. Every log starts with the app version, short commit ID, executable SHA256, executable path, OS/build environment, boot-session ID, and elevation state.
 
-A Windows restart is required after applying or restoring a mapping. GiHATE defaults to **Restart now**, but you can choose to restart later.
+Use **Advanced -> Diagnostics -> Copy log file** when reporting an issue.
+
+A Windows restart is required after applying, restoring, reverting, or importing a backup. GiHATE defaults to **Restart now**, but you can choose to restart later. If you choose later, a small background watcher can notify you when you press the GiMATE button before the required restart.
 
 ## Giving the key a useful action
 
@@ -48,6 +51,22 @@ Example: the original test setup uses `Shift + F24` to launch PowerShell.
 
 See [PowerToys setup](docs/POWERTOYS.md) for the exact steps.
 
+## Advanced
+
+The main window is intentionally kept simple. **Advanced** contains:
+
+- current HID/mapping/restart state
+- post-reboot verification
+- build/publisher/commit/SHA256 information
+- backup export/import
+- Restore GiMATE
+- log/config-folder tools
+- developer launch modes
+
+The post-reboot task uses an **ONLOGON** trigger instead of a raw boot trigger because the verifier is a visible desktop UI. It self-deletes after it runs on a boot newer than the one that requested the restart.
+
+See [Advanced / verification](docs/ADVANCED.md).
+
 ## Tested hardware
 
 Built and tested on an **AORUS Master 16 AM6H**. Other GIGABYTE laptops should use the guided detection flow instead of assuming the same device IDs.
@@ -60,6 +79,7 @@ More detail:
 
 - [How it works](docs/HOW-IT-WORKS.md)
 - [Detection and safety](docs/DETECTION.md)
+- [Advanced / verification / backups](docs/ADVANCED.md)
 - [Tested hardware / original investigation](docs/TESTED-HARDWARE.md)
 - [Limitations and risks](docs/LIMITATIONS.md)
 - [PowerToys setup](docs/POWERTOYS.md)
