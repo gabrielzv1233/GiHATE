@@ -11,6 +11,21 @@ GiHATE stores restart-required state with an identifier for the Windows boot whe
 - configured but HID/scancode state does not match
 - revert staged but not applied yet
 
+GiHATE also treats these as two different things:
+
+- **live HID state**: whether Windows has the vendor HID disabled on the current boot right now
+- **persistent disable flag**: whether Windows is scheduled to start that HID disabled after reboot
+
+This matters on systems where GIGABYTE software vetoes the live device removal. Before reboot, Advanced may correctly show something like:
+
+```text
+GiMATE vendor HID now: Enabled
+Persistent HID disable flag: Disable scheduled / persistent
+Restart: Required
+```
+
+That is not a failure. It means the disable has been persisted and Windows still needs to restart before the live device state changes.
+
 ## Post-reboot verification
 
 After Apply, Restore, Revert, or backup import, GiHATE creates a scheduled task named:
@@ -19,7 +34,7 @@ After Apply, Restore, Revert, or backup import, GiHATE creates a scheduled task 
 GiHATE Verify After Restart
 ```
 
-It uses an `ONLOGON` trigger with a short delay. A raw `ONSTART` task runs before an interactive desktop session exists, so it cannot reliably show the small verification window the user asked for.
+It uses an `ONLOGON` trigger with a short delay and runs interactively so the verifier can appear in the signed-in user's desktop session. A raw `ONSTART` task can run before an interactive desktop exists, so it is not appropriate for a visible verification window.
 
 The task launches the same portable executable with:
 
@@ -31,7 +46,8 @@ If the task fires on the same Windows boot because the user only logged out/in, 
 
 The verifier shows:
 
-- GiMATE vendor HID enabled/disabled/unknown
+- live GiMATE vendor HID state
+- scheduled/persistent HID disable state when a restart is pending
 - source scan code and expected destination mapping
 - Windows restart state
 - whether a known GIGABYTE/GiMATE listener process is running
