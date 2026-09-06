@@ -78,7 +78,7 @@ internal sealed class PendingRestartWatcherForm : Form
 
         if (!_config.IsRestartPending)
         {
-            BeginInvoke(Close);
+            BeginInvoke((MethodInvoker)(() => Close()));
             return;
         }
 
