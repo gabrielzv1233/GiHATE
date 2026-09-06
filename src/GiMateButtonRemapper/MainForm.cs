@@ -14,6 +14,7 @@ public sealed class MainForm : Form
     private readonly Button _apply = new();
     private readonly Button _restore = new();
     private readonly Button _openLog = new();
+    private readonly Button _revert = new();
     private bool _busy;
 
     public MainForm()
@@ -231,9 +232,21 @@ public sealed class MainForm : Form
         actionFlow.Controls.Add(_restore);
         AddRow(actionFlow, 22);
 
-        var utilityFlow = new FlowLayoutPanel
+        var bottomBar = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0)
+        };
+        bottomBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        bottomBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var utilityFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             FlowDirection = FlowDirection.LeftToRight,
@@ -273,9 +286,19 @@ public sealed class MainForm : Form
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Could not open log", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         };
 
+        _revert.Text = "Revert changes";
+        _revert.AutoSize = true;
+        _revert.MinimumSize = new Size(150, 38);
+        _revert.Padding = new Padding(10, 4, 10, 4);
+        _revert.Margin = new Padding(16, 0, 0, 0);
+        _revert.Anchor = AnchorStyles.Right;
+        _revert.Click += async (_, _) => await RevertChangesAsync();
+
         utilityFlow.Controls.Add(configButton);
         utilityFlow.Controls.Add(_openLog);
-        AddRow(utilityFlow, 14);
+        bottomBar.Controls.Add(utilityFlow, 0, 0);
+        bottomBar.Controls.Add(_revert, 1, 0);
+        AddRow(bottomBar, 14);
 
         AddRow(new Label
         {
@@ -296,7 +319,8 @@ public sealed class MainForm : Form
             _status.Text = "Status: Not configured";
             _detail.Text = "Run detection first. Detection opens in its own guided window with a live 0/3 press counter and a separate keyboard safety-check step.";
             _apply.Enabled = false;
-            _restore.Enabled = _config.Applied;
+            _restore.Enabled = false;
+            _revert.Enabled = false;
             _detect.Enabled = true;
             _knownProfile.Enabled = true;
             _target.Enabled = true;
@@ -309,6 +333,7 @@ public sealed class MainForm : Form
             (deviceState is null ? "" : $"\nPnP status bits: 0x{deviceState.Value.Status:X8}, problem: {deviceState.Value.Problem}");
         _apply.Enabled = true;
         _restore.Enabled = _config.Applied;
+        _revert.Enabled = true;
         _detect.Enabled = true;
         _knownProfile.Enabled = true;
         _target.Enabled = true;
@@ -387,12 +412,14 @@ public sealed class MainForm : Form
             AppLog.Info($"Keyboard instance: {_config.Profile.KeyboardInstanceId}");
             AppLog.Info($"Vendor instance: {_config.Profile.VendorInstanceId}");
 
-            if (!_config.Applied)
+            if (!_config.OriginalMappingCaptured)
             {
                 var original = ScancodeMap.GetSourceMapping(_config.Profile.SourceScanCode);
                 _config.HadOriginalSourceMapping = original.Exists;
                 _config.OriginalSourceDestination = original.Destination;
-                AppLog.Info($"Captured original source mapping. Exists={original.Exists}, Destination=0x{original.Destination:X4}");
+                _config.OriginalMappingCaptured = true;
+                _config.Save();
+                AppLog.Info($"Captured and persisted original source mapping. Exists={original.Exists}, Destination=0x{original.Destination:X4}");
             }
 
             var deviceResult = DeviceManager.DisablePersistent(_config.Profile.VendorInstanceId);
@@ -404,7 +431,10 @@ public sealed class MainForm : Form
             _config.Save();
             AppLog.Info("===== APPLY SUCCESS =====");
 
-            using var prompt = new RestartPromptForm($"GiHATE disabled the vendor HID trigger and mapped scan 0x{_config.Profile.SourceScanCode:X2} to {targetName}.");
+            var pendingText = deviceResult.RestartRequired
+                ? " The vendor HID disable has been scheduled for the reboot."
+                : "";
+            using var prompt = new RestartPromptForm($"GiHATE configured scan 0x{_config.Profile.SourceScanCode:X2} as {targetName}.{pendingText}");
             var dialogResult = prompt.ShowDialog(this);
             AppLog.Info($"Restart prompt closed. DialogResult={dialogResult}, RestartNow={prompt.RestartNow}");
             if (dialogResult == DialogResult.OK && prompt.RestartNow)
@@ -418,7 +448,7 @@ public sealed class MainForm : Form
             AppLog.Exception("Apply failed", ex);
             MessageBox.Show(
                 this,
-                $"{ex.Message}\n\nFull diagnostic details were written to:\n{AppLog.LogPath}",
+                $"{ex.Message}\n\nUse Revert changes if you want GiHATE to clear any partial or pending changes.\n\nFull diagnostic details were written to:\n{AppLog.LogPath}",
                 "Apply failed",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -440,35 +470,74 @@ public sealed class MainForm : Form
             return;
         }
 
-        SetBusy(true, "Restoring...");
+        await RevertInternalAsync("Restoring...", "GiHATE restored the original GiMATE device path and scan-code mapping.", "RESTORE");
+    }
+
+    private async Task RevertChangesAsync()
+    {
+        if (_config.Profile is null || _busy) return;
+
+        if (MessageBox.Show(
+                this,
+                "Revert any GiHATE changes or pending device changes?\n\nThis clears the persistent vendor-HID disable, re-enables the GiMATE interface, and restores the scan-code mapping only if GiHATE previously captured it. A restart is required to fully settle pending PnP changes.",
+                "Revert GiHATE changes",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        {
+            AppLog.Info("Revert changes cancelled by user.");
+            return;
+        }
+
+        await RevertInternalAsync("Reverting...", "GiHATE cleared applied or pending changes and restored the pre-Apply state.", "REVERT");
+    }
+
+    private async Task RevertInternalAsync(string busyText, string restartMessage, string logName)
+    {
+        if (_config.Profile is null) return;
+
+        SetBusy(true, busyText);
         await Task.Yield();
 
         try
         {
-            AppLog.Info("===== RESTORE START =====");
+            AppLog.Info($"===== {logName} START =====");
             var deviceResult = DeviceManager.Enable(_config.Profile.VendorInstanceId);
             AppLog.Info($"Vendor HID enable accepted via {deviceResult.Method}. Pending-reboot path={deviceResult.RestartRequired}");
-            ScancodeMap.RestoreSource(_config.Profile.SourceScanCode, _config.HadOriginalSourceMapping, _config.OriginalSourceDestination);
-            _config.Applied = false;
-            _config.Save();
-            AppLog.Info("===== RESTORE SUCCESS =====");
 
-            using var prompt = new RestartPromptForm("GiHATE restored the original GiMATE device path and scan-code mapping.");
+            if (_config.OriginalMappingCaptured)
+            {
+                ScancodeMap.RestoreSource(_config.Profile.SourceScanCode, _config.HadOriginalSourceMapping, _config.OriginalSourceDestination);
+                AppLog.Info("Restored captured pre-Apply scan-code mapping.");
+            }
+            else
+            {
+                AppLog.Info("No captured pre-Apply scan-code mapping exists; scancode registry state was left untouched.");
+            }
+
+            _config.Applied = false;
+            _config.OriginalMappingCaptured = false;
+            _config.HadOriginalSourceMapping = false;
+            _config.OriginalSourceDestination = 0;
+            _config.Save();
+            AppLog.Info($"===== {logName} SUCCESS =====");
+
+            using var prompt = new RestartPromptForm(restartMessage);
             var dialogResult = prompt.ShowDialog(this);
-            AppLog.Info($"Restore restart prompt closed. DialogResult={dialogResult}, RestartNow={prompt.RestartNow}");
+            AppLog.Info($"{logName} restart prompt closed. DialogResult={dialogResult}, RestartNow={prompt.RestartNow}");
             if (dialogResult == DialogResult.OK && prompt.RestartNow)
             {
-                AppLog.Info("Restart now selected after restore. Requesting Windows restart.");
+                AppLog.Info($"Restart now selected after {logName.ToLowerInvariant()}. Requesting Windows restart.");
                 RestartWindows();
             }
         }
         catch (Exception ex)
         {
-            AppLog.Exception("Restore failed", ex);
+            AppLog.Exception($"{logName} failed", ex);
             MessageBox.Show(
                 this,
                 $"{ex.Message}\n\nFull diagnostic details were written to:\n{AppLog.LogPath}",
-                "Restore failed",
+                $"{logName} failed",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -483,8 +552,9 @@ public sealed class MainForm : Form
     {
         _busy = busy;
         UseWaitCursor = busy;
-        _apply.Enabled = !busy;
+        _apply.Enabled = !busy && _config.Profile is not null;
         _restore.Enabled = !busy && _config.Applied;
+        _revert.Enabled = !busy && _config.Profile is not null;
         _detect.Enabled = !busy;
         _knownProfile.Enabled = !busy;
         _target.Enabled = !busy;
