@@ -6,16 +6,33 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+
     <AssemblyName>GiHATE</AssemblyName>
     <RootNamespace>GiHATE</RootNamespace>
+    <Title>GiHATE</Title>
+    <Product>GiHATE</Product>
+    <Company>Gabrielzv1233</Company>
+    <Authors>Gabrielzv1233</Authors>
+    <Description>GIGABYTE GiMATE hardware button disabler and programmable key remapper.</Description>
+    <Copyright>Copyright © Gabrielzv1233 2026</Copyright>
+    <NeutralLanguage>en-US</NeutralLanguage>
+
+    <Version>0.1.1</Version>
+    <AssemblyVersion>0.1.1.0</AssemblyVersion>
+    <FileVersion>0.1.1.0</FileVersion>
+    <InformationalVersion>0.1.1</InformationalVersion>
+
+    <RepositoryUrl>https://github.com/gabrielzv1233/GiHATE</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/gabrielzv1233/GiHATE</PackageProjectUrl>
+
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+
+    <Deterministic>true</Deterministic>
     <DebugType>embedded</DebugType>
-    <Version>0.1.0</Version>
-    <Company>Gabrielzv1233</Company>
-    <Product>GiHATE</Product>
-    <Description>Disable the GiMATE hardware trigger and reuse its keyboard scan code.</Description>
   </PropertyGroup>
 </Project>
