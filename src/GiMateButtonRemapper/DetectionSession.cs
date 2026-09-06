@@ -10,8 +10,8 @@ internal sealed class DetectionSession
 
     public DetectedProfile? FindButtonCandidate()
     {
-        var keyboard = _keys.Where(x => x.ScanCode != 0).GroupBy(x => (x.DevicePath, x.InstanceId, x.ScanCode)).Select(g => new { g.Key, Count = g.Count() }).Where(x => x.Count >= 2).OrderByDescending(x => x.Count).FirstOrDefault();
-        var hid = _hids.Where(x => x.UsagePage >= 0xFF00 && x.Bytes.Length > 0).GroupBy(x => (x.DevicePath, x.InstanceId, x.VendorId, x.ProductId, x.UsagePage, x.Usage, x.Hex)).Select(g => new { g.Key, Count = g.Count() }).Where(x => x.Count >= 2).OrderByDescending(x => x.Count).FirstOrDefault();
+        var keyboard = _keys.Where(x => x.ScanCode != 0).GroupBy(x => (x.DevicePath, x.InstanceId, x.ScanCode)).Select(g => new { g.Key, Count = g.Count() }).Where(x => x.Count >= 3).OrderByDescending(x => x.Count).FirstOrDefault();
+        var hid = _hids.Where(x => x.UsagePage >= 0xFF00 && x.Bytes.Length > 0).GroupBy(x => (x.DevicePath, x.InstanceId, x.VendorId, x.ProductId, x.UsagePage, x.Usage, x.Hex)).Select(g => new { g.Key, Count = g.Count() }).Where(x => x.Count >= 3).OrderByDescending(x => x.Count).FirstOrDefault();
         if (keyboard is null || hid is null || string.Equals(keyboard.Key.InstanceId, hid.Key.InstanceId, StringComparison.OrdinalIgnoreCase)) return null;
         return new DetectedProfile { KeyboardDevicePath = keyboard.Key.DevicePath, KeyboardInstanceId = keyboard.Key.InstanceId, VendorDevicePath = hid.Key.DevicePath, VendorInstanceId = hid.Key.InstanceId, SourceScanCode = keyboard.Key.ScanCode, VendorId = hid.Key.VendorId, ProductId = hid.Key.ProductId, VendorUsagePage = hid.Key.UsagePage, VendorUsage = hid.Key.Usage, VendorReportHex = hid.Key.Hex };
     }

@@ -25,7 +25,7 @@ internal static class DeviceManager
     {
         var result = CM_Get_Device_ID_List_SizeW(out var length, null, 0);
         if (result != CrSuccess || length == 0) return Array.Empty<string>();
-        var buffer = new char[length];
+        var buffer = new char[checked((int)length)];
         result = CM_Get_Device_ID_ListW(null, buffer, length, 0);
         if (result != CrSuccess) return Array.Empty<string>();
         return new string(buffer).Split('\0', StringSplitOptions.RemoveEmptyEntries).Where(x => x.Contains(contains, StringComparison.OrdinalIgnoreCase)).ToArray();
