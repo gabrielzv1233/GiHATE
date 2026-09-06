@@ -32,6 +32,7 @@ internal sealed class DetectionWizardForm : Form
         Font = new Font("Segoe UI", 10);
         AutoScaleMode = AutoScaleMode.Dpi;
 
+        AppLog.Info("Detection wizard opened. Stage=Button, expected correlated presses=3.");
         BuildUi();
 
         _raw.Keyboard += OnKeyboard;
@@ -39,9 +40,14 @@ internal sealed class DetectionWizardForm : Form
 
         Shown += (_, _) =>
         {
-            try { _raw.Register(Handle); }
+            try
+            {
+                _raw.Register(Handle);
+                AppLog.Info($"Raw Input registered to detection-wizard handle 0x{Handle.ToInt64():X}.");
+            }
             catch (Exception ex)
             {
+                AppLog.Exception("Detection wizard Raw Input registration failed", ex);
                 MessageBox.Show(this, ex.Message, "Raw Input registration failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 DialogResult = DialogResult.Cancel;
                 Close();
@@ -57,9 +63,21 @@ internal sealed class DetectionWizardForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        AppLog.Info($"Detection wizard closing. Stage={_stage}, DialogResult={DialogResult}.");
         _raw.Keyboard -= OnKeyboard;
         _raw.Hid -= OnHid;
-        try { if (_returnHandle != IntPtr.Zero) _raw.Register(_returnHandle); } catch { }
+        try
+        {
+            if (_returnHandle != IntPtr.Zero)
+            {
+                _raw.Register(_returnHandle);
+                AppLog.Info($"Raw Input target restored to main-window handle 0x{_returnHandle.ToInt64():X}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Exception("Failed to restore Raw Input target to main window", ex);
+        }
         base.OnFormClosed(e);
     }
 
@@ -115,7 +133,12 @@ internal sealed class DetectionWizardForm : Form
         _cancel.AutoSize = true;
         _cancel.Padding = new Padding(12, 4, 12, 4);
         _cancel.Anchor = AnchorStyles.Right;
-        _cancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
+        _cancel.Click += (_, _) =>
+        {
+            AppLog.Info("Detection wizard cancelled by user.");
+            DialogResult = DialogResult.Cancel;
+            Close();
+        };
 
         root.Controls.Add(_step, 0, 0);
         root.Controls.Add(_instruction, 0, 1);
@@ -127,6 +150,9 @@ internal sealed class DetectionWizardForm : Form
 
     private void OnKeyboard(KeyboardRawEvent e)
     {
+        if (e.IsKeyDown)
+            AppLog.Info($"Detection RAW_KEYBOARD stage={_stage}: scan=0x{e.ScanCode:X2}, vkey=0x{e.VKey:X2}, flags=0x{e.Flags:X4}, instance='{e.InstanceId}', device='{e.DevicePath}'");
+
         if (_stage == DetectionStage.Button)
         {
             _session.Add(e);
@@ -144,9 +170,10 @@ internal sealed class DetectionWizardForm : Form
             return;
 
         _safetyCheckPending = true;
+        var keyName = e.VKey == 0 ? $"scan 0x{e.ScanCode:X2}" : ((Keys)e.VKey).ToString();
+        AppLog.Info($"Safety-check normal key candidate: {keyName}, scan=0x{e.ScanCode:X2}, instance='{e.InstanceId}'.");
         BeginInvoke(() =>
         {
-            var keyName = e.VKey == 0 ? $"scan 0x{e.ScanCode:X2}" : ((Keys)e.VKey).ToString();
             _counter.Text = $"Normal key detected: {keyName}";
             _detail.Text = "Verifying that this normal keyboard press does not also come from the vendor HID interface GiHATE plans to disable...";
             _progress.Style = ProgressBarStyle.Marquee;
@@ -159,6 +186,7 @@ internal sealed class DetectionWizardForm : Form
         if (_stage == DetectionStage.Done)
             return;
 
+        AppLog.Info($"Detection RAW_HID stage={_stage}: VID=0x{e.VendorId:X4}, PID=0x{e.ProductId:X4}, usage=0x{e.UsagePage:X4}/0x{e.Usage:X2}, report='{e.Hex}', instance='{e.InstanceId}', device='{e.DevicePath}'");
         _session.Add(e);
 
         if (_stage == DetectionStage.Button)
@@ -171,6 +199,7 @@ internal sealed class DetectionWizardForm : Form
     private void UpdateButtonProgress()
     {
         var progress = _session.GetButtonPressProgress();
+        AppLog.Info($"Detection correlated GiMATE progress: {progress}/3.");
         BeginInvoke(() =>
         {
             _counter.Text = $"GiMATE presses detected: {progress} / 3";
@@ -191,6 +220,7 @@ internal sealed class DetectionWizardForm : Form
         _candidate = candidate;
         _session.Clear();
         _stage = DetectionStage.Safety;
+        AppLog.Info($"GiMATE candidate locked after 3 correlated presses: scan=0x{candidate.SourceScanCode:X2}, keyboard='{candidate.KeyboardInstanceId}', vendor='{candidate.VendorInstanceId}', VID=0x{candidate.VendorId:X4}, PID=0x{candidate.ProductId:X4}, usage=0x{candidate.VendorUsagePage:X4}/0x{candidate.VendorUsage:X2}, report='{candidate.VendorReportHex}'.");
 
         BeginInvoke(() =>
         {
@@ -213,6 +243,7 @@ internal sealed class DetectionWizardForm : Form
 
         var passed = _session.NormalKeySafetyPassed(_candidate);
         _safetyCheckPending = false;
+        AppLog.Info($"Safety-check result: passed={passed}.");
 
         if (!passed)
         {
@@ -230,6 +261,7 @@ internal sealed class DetectionWizardForm : Form
 
         if (_candidate.VendorUsagePage < 0xFF00 || string.IsNullOrWhiteSpace(_candidate.VendorInstanceId) || string.IsNullOrWhiteSpace(_candidate.KeyboardInstanceId))
         {
+            AppLog.Warn("Detected profile failed final vendor-HID safety validation.");
             BeginInvoke(() =>
             {
                 MessageBox.Show(this, "The candidate failed GiHATE's vendor-HID safety checks. Nothing was changed.", "Detection failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -241,6 +273,7 @@ internal sealed class DetectionWizardForm : Form
 
         ResultProfile = _candidate;
         _stage = DetectionStage.Done;
+        AppLog.Info("Detection and safety verification completed successfully. No system changes have been made yet.");
 
         BeginInvoke(() =>
         {
