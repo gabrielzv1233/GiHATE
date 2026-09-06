@@ -23,6 +23,7 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
       NUGET_XMLDOC_MODE: skip
+      SOURCE_REVISION: ${{ github.sha }}
 
     steps:
       - uses: actions/checkout@v7
@@ -33,11 +34,22 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore NuGet/runtime package cache
+        id: nuget-cache
         if: ${{ !inputs.clean_build }}
         uses: actions/cache@v5
         with:
           path: ${{ env.NUGET_PACKAGES }}
           key: nuget-${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}-${{ env.BUILD_RID }}-${{ env.NUGET_CACHE_VERSION }}
+
+      - name: Show cache status
+        if: ${{ !inputs.clean_build }}
+        shell: pwsh
+        run: |
+          if ('${{ steps.nuget-cache.outputs.cache-hit }}' -eq 'true') {
+            Write-Host 'NuGet/runtime cache: EXACT HIT'
+          } else {
+            Write-Host 'NuGet/runtime cache: MISS - this run will populate the stable cache key.'
+          }
 
       - name: Clean package directory
         if: ${{ inputs.clean_build }}
@@ -56,6 +68,8 @@ jobs:
           -r $env:BUILD_RID
           --self-contained true
           -p:PublishSingleFile=true
+          -p:ContinuousIntegrationBuild=true
+          -p:SourceRevisionId=$env:SOURCE_REVISION
           -o .\publish
 
       - name: Upload GiHATE.exe
