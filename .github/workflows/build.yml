@@ -22,7 +22,7 @@ jobs:
       NUGET_XMLDOC_MODE: skip
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up .NET 8
         uses: actions/setup-dotnet@v6
