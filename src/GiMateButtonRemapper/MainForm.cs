@@ -216,25 +216,54 @@ public sealed class MainForm : Form
             var target = _config.PendingExpectedMappingExists
                 ? ScancodeMap.Targets.FirstOrDefault(x => x.Value == _config.PendingExpectedMappingDestination).Key ?? $"0x{_config.PendingExpectedMappingDestination:X2}"
                 : "original / none";
-            _detail.Text = $"Changes are saved but are not active on this Windows boot. Pending: GiMATE HID -> {(_config.PendingExpectedHidDisabled ? "Disabled" : "Enabled")}; scan 0x{_config.Profile.SourceScanCode:X2} -> {target}. Restart Windows before testing the button.";
+            var live = FormatHid(verification.HidDisabled);
+            var scheduled = verification.PersistentDisableFlagSet switch { true => "disable scheduled", false => "enable scheduled / disable cleared", null => "persistent state unknown" };
+            _detail.Text = $"Changes are saved but are not active on this Windows boot. GiMATE HID now: {live}; {scheduled}. Pending mapping: scan 0x{_config.Profile.SourceScanCode:X2} -> {target}. Restart Windows before testing the button.";
             return;
         }
 
         if (_config.RestartOccurred)
         {
-            _status.Text = verification.ExpectedStateMatches ? "Restart completed - verification ready" : "Restart completed - configuration mismatch";
-            _status.ForeColor = verification.ExpectedStateMatches ? Color.DarkGreen : Color.DarkRed;
-            _detail.Text = verification.ExpectedStateMatches
-                ? "The expected HID and scan-code state is present. The one-shot verifier will confirm GIGABYTE is running and finish the post-reboot check."
-                : "Windows has restarted, but the expected HID or scan-code state does not match. Open Advanced -> Verify now and attach latest.log if it remains broken.";
+            if (!verification.ExpectedStateMatches)
+            {
+                _status.Text = "Restart completed - configuration mismatch";
+                _status.ForeColor = Color.DarkRed;
+                _detail.Text = "Windows has restarted, but the expected HID or scan-code state does not match. Open Advanced -> Verify now and attach latest.log if it remains broken.";
+            }
+            else if (!verification.GigabyteReady)
+            {
+                _status.Text = "Restart completed - waiting for GIGABYTE";
+                _status.ForeColor = Color.DarkOrange;
+                _detail.Text = "The HID and scan-code state match, but no known GIGABYTE/GiMATE listener process is running yet. A button test is not conclusive until that software is ready.";
+            }
+            else
+            {
+                _status.Text = "Restart completed - ready to verify";
+                _status.ForeColor = Color.DarkGreen;
+                _detail.Text = $"The expected HID and scan-code state is present and GIGABYTE is running ({string.Join(", ", verification.GigabyteProcesses)}). The one-shot verifier can now give a meaningful result.";
+            }
             return;
         }
 
         if (_config.Applied)
         {
-            _status.Text = verification.ExpectedStateMatches ? "Configured and healthy" : "Configured - state mismatch";
-            _status.ForeColor = verification.ExpectedStateMatches ? Color.DarkGreen : Color.DarkRed;
-            _detail.Text = $"GiMATE vendor HID: {FormatHid(verification.HidDisabled)}. Mapping: 0x{_config.Profile.SourceScanCode:X2} -> {_config.TargetKey}. GIGABYTE listener: {(verification.GigabyteReady ? string.Join(", ", verification.GigabyteProcesses) : "not detected yet")}.";
+            if (!verification.ExpectedStateMatches)
+            {
+                _status.Text = "Configured - state mismatch";
+                _status.ForeColor = Color.DarkRed;
+            }
+            else if (!verification.GigabyteReady)
+            {
+                _status.Text = "Configured - GIGABYTE not ready";
+                _status.ForeColor = Color.DarkOrange;
+            }
+            else
+            {
+                _status.Text = "Configured and healthy";
+                _status.ForeColor = Color.DarkGreen;
+            }
+
+            _detail.Text = $"GiMATE vendor HID: {FormatHid(verification.HidDisabled)}. Mapping: 0x{_config.Profile.SourceScanCode:X2} -> {_config.TargetKey}. GIGABYTE listener: {(verification.GigabyteReady ? string.Join(", ", verification.GigabyteProcesses) : "not detected yet; button behavior is not fully testable yet")}.";
             return;
         }
 
