@@ -98,10 +98,27 @@ internal sealed class VerifyForm : Form
         };
 
         var source = _config.Profile.SourceScanCode;
-        var expectedDestination = _config.RestartRequired
-            ? _config.PendingExpectedMappingDestination
-            : ScancodeMap.Targets.TryGetValue(_config.TargetKey, out var target) ? target : (ushort)0;
-        var expectedName = ScancodeMap.Targets.FirstOrDefault(x => x.Value == expectedDestination).Key ?? $"0x{expectedDestination:X2}";
+        bool expectedExists;
+        ushort expectedDestination;
+        if (_config.RestartRequired)
+        {
+            expectedExists = _config.PendingExpectedMappingExists;
+            expectedDestination = _config.PendingExpectedMappingDestination;
+        }
+        else if (_config.Applied)
+        {
+            expectedExists = true;
+            expectedDestination = ScancodeMap.Targets.TryGetValue(_config.TargetKey, out var target) ? target : (ushort)0;
+        }
+        else
+        {
+            expectedExists = _config.OriginalMappingCaptured && _config.HadOriginalSourceMapping;
+            expectedDestination = _config.OriginalMappingCaptured ? _config.OriginalSourceDestination : (ushort)0;
+        }
+
+        var expectedName = expectedExists
+            ? ScancodeMap.Targets.FirstOrDefault(x => x.Value == expectedDestination).Key ?? $"0x{expectedDestination:X2}"
+            : "no mapping";
         _mapping.Text = result.MappingMatches
             ? $"✓ 0x{source:X2} -> {expectedName} mapped successfully"
             : $"✕ 0x{source:X2} mapping does not match expected {expectedName}";
