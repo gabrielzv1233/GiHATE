@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 
@@ -22,7 +23,21 @@ internal sealed record BuildDetails(
         var version = informational.Split('+', 2)[0];
         var suffix = informational.Contains('+') ? informational.Split('+', 2)[1] : "";
         var commit = suffix.Length >= 7 ? suffix[..7] : string.IsNullOrWhiteSpace(suffix) ? "unknown" : suffix;
-        var executable = Environment.ProcessPath ?? assembly.Location;
+
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable))
+        {
+            try
+            {
+                executable = Process.GetCurrentProcess().MainModule?.FileName;
+            }
+            catch
+            {
+                // Fall through to a best-effort path below.
+            }
+        }
+
+        executable ??= Path.Combine(AppContext.BaseDirectory, $"{Process.GetCurrentProcess().ProcessName}.exe");
         var hash = "unavailable";
 
         try
